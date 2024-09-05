@@ -5,10 +5,28 @@
 #include <ESP8266WiFiMulti.h>
 #include <ESP8266mDNS.h>
 #include <ESP8266WebServer.h>
-#include <FS.h
+#include <FS.h>
 ESP8266WebServer server(80);
 
 constexpr unsigned LARGE_STR = 512 - 1;
+constexpr unsigned XLARGE_STR = 1024 - 1;
+
+String loader_checksum, firmware_checksum = "";
+
+File fsUploadFile; // a File object to temporarily store the received file
+void log_args();
+void uploadFiles();
+static void webserver_ota_begin();
+static void webserver_ota_upload();
+static void setup_webserver();
+
+#define RESERVE_STRING(name, size)      \
+    String name((const char *)nullptr); \
+    name.reserve(size)
+
+// Function declarations
+void log_args();
+
 /****************************************************************
  * HTML helpers pulled from openstuttgart
  * Ignore as not main part of this test
@@ -46,7 +64,7 @@ static void start_html_page(String &page_content, const String &title)
     s = FPSTR(WEB_PAGE_HEADER);
     s.replace("{t}", title);
     server.setContentLength(CONTENT_LENGTH_UNKNOWN);
-    server.send(200, FPSTR(TXT_CONTENT_TYPE_TEXT_HTML), s);
+    server.send(200, FPSTR("text/html; charset=utf-8"), s);
 
     server.sendContent_P(WEB_PAGE_HEADER_HEAD);
     s.replace("{t}", title);
@@ -95,7 +113,7 @@ static void webserver_ota_upload()
     RESERVE_STRING(page_content, XLARGE_STR);
     // start_html_page(page_content, emptyString);
     start_html_page(page_content, "OTA update");
-    page_content += FPSTR(WEB_B_BR);
+    page_content += "<br/><br/>";
     page_content += F("<form method='POST' action='/ota_begin' enctype='multipart/form-data' style='width:100%;'>\n<b> OTA OVER ESP AP WEBSERVER </b><br/>");
     page_content += F("<b> Firmware Loader bin</b><br/>");
     String form_input = F("<label for='loader_checksum'><input type='text' name='loader_checksum' placeholder='Enter loader checksum'><br/>");
@@ -113,5 +131,97 @@ static void webserver_ota_upload()
 }
 
 static void webserver_ota_begin()
+{
+    // Debuging: Log args
+    log_args();
+
+    // get server post arguements
+    if (!server.hasArg("loader_checksum"))
+    {
+        Serial.println("Loader bin MD5 checksum missing");
+        return;
+    }
+    loader_checksum = server.arg("loader_checksum");
+    if (!server.hasArg("fmw_checksum"))
+    {
+        Serial.println("Firmware bin MD5 checksum missing");
+        return;
+    }
+    firmware_checksum = server.arg("fmw_checksum");
+
+    // upload files
+    uploadFiles();
+    // validate md5
+    // beging upload
+}
+
+void uploadFiles()
+{ // upload a new file to the SPIFFS
+    HTTPUpload &upload = server.upload();
+
+    while (upload.status == UPLOAD_FILE_START)
+    {
+
+        String fname = upload.filename;
+        if (!fname.startsWith("/"))
+            fname = "/" + fname;
+        Serial.print("Upload File Name: ");
+        Serial.println(fname);
+        fsUploadFile = SPIFFS.open(fname, "w"); // Open the file for writing in SPIFFS (create if it doesn't exist)
+        fname = String();
+
+        if (upload.status == UPLOAD_FILE_WRITE)
+        {
+            if (fsUploadFile)
+                fsUploadFile.write(upload.buf, upload.currentSize);
+        }
+
+        else if (upload.status == UPLOAD_FILE_END)
+        {
+            if (fsUploadFile)
+            {                         // If the file was successfully created
+                fsUploadFile.close(); // Close the file again
+                Serial.print("File Upload Size: ");
+                Serial.println(upload.totalSize);
+                String msg = "201: Successfully created file ";
+                msg += fname;
+                server.send(500, "text/plain", msg);
+            }
+            else
+            {
+                String err_msg = "500: failed creating file ";
+                err_msg += fname;
+                server.send(500, "text/plain", err_msg);
+            }
+        }
+        delay(1000);
+    }
+}
+
+void log_args()
+{
+
+    Serial.print("Recieved args: ");
+    Serial.println(server.args());
+
+    for (int i = 0; i < server.args(); i++)
+    {
+
+        String log = "Arg ";
+        log += i;
+        log += ": ";
+        log += server.argName(i);
+        Serial.println(log);
+    }
+}
+
+void setup()
+{
+    Serial.begin(9600);
+    delay(2000);
+    setup_webserver();
+}
+
+void loop()
 {
 }
