@@ -219,6 +219,13 @@ void setup()
 {
     Serial.begin(9600);
     delay(2000);
+    const char *ssid = "ESP8266-OTA-TEST";
+    const char *password = "123456789";
+    WiFi.mode(WIFI_AP);
+    const IPAddress apIP(192, 168, 4, 1);
+    WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
+    WiFi.softAP(ssid, password);
+    delay(2000);
     setup_webserver();
 }
 
