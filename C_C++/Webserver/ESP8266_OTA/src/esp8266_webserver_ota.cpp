@@ -12,7 +12,11 @@ constexpr unsigned LARGE_STR = 512 - 1;
 constexpr unsigned XLARGE_STR = 1024 - 1;
 
 String loader_checksum, firmware_checksum, fname = "";
-bool log_once = true;
+// Replace bin filenames with the exactly the ones you want to upload
+String loaderfilename = "/loader-002.bin";
+String new_firmware_filename = "/new_firmware.bin";
+bool loader_bin_saved = false;
+bool firmware_bin_saved = false;
 
 File uploadFile; // a File object to temporarily store the received file
 void log_args();
@@ -21,6 +25,8 @@ static void webserver_ota_begin();
 static void webserver_ota_upload();
 static void setup_webserver();
 static void file_checker();
+void two_stage_firmware_update();
+bool validate_bin_md5(String filename, String md5_checksum);
 
 #define RESERVE_STRING(name, size)      \
     String name((const char *)nullptr); \
@@ -155,10 +161,6 @@ static void webserver_ota_begin()
 
     // uploadFiles();
     uploadFiles();
-
-    // validate md5
-
-    // begin upload
 }
 
 void uploadFiles()
@@ -182,7 +184,7 @@ void uploadFiles()
         {
             Serial.println("File opened");
         }
-        fname = String();
+        // fname = String();
         Serial.print("fname: ");
         Serial.println(fname);
     }
@@ -206,6 +208,15 @@ void uploadFiles()
             msg += fname;
             server.send(200, "text/plain", msg);
             Serial.println(msg);
+
+            if (fname = loaderfilename)
+            {
+                loader_bin_saved = true;
+            }
+            else if (fname = new_firmware_filename)
+            {
+                firmware_bin_saved = true;
+            }
         }
         else
         {
@@ -283,4 +294,70 @@ void setup()
 void loop()
 {
     server.handleClient();
+    if (loader_bin_saved && firmware_bin_saved)
+    {
+        Serial.println("Beginning two stage firmware update");
+        void two_stage_firmware_update();
+    }
+}
+
+void two_stage_firmware_update()
+{
+
+    // validate new firmware file md5
+
+    if (!validate_bin_md5(loaderfilename, loader_checksum))
+    {
+        Serial.print('Deleting file: ');
+        Serial.println(loaderfilename);
+        SPIFFS.remove(loaderfilename);
+        loader_bin_saved = false;
+        Serial.println("Two-stage firmware update failed at md5 checksum validation");
+        return;
+    }
+    if (!validate_bin_md5(new_firmware_filename, firmware_checksum))
+    {
+        Serial.print('Deleting file: ');
+        Serial.println(new_firmware_filename);
+        SPIFFS.remove(new_firmware_filename);
+        firmware_bin_saved = false;
+        Serial.println("Two-stage firmware update failed at md5 checksum validation");
+        return;
+    }
+
+    // begin update
+}
+
+bool validate_bin_md5(String filename, String md5_checksum)
+{
+
+    // validate new firmware file md5
+    MD5Builder md5;
+    String md5String = ""; // initialize to invalidate if file fails to open
+    size_t file_size = -1; // initialize to invalidate if file fails to open
+    uploadFile = SPIFFS.open(filename, "r");
+    if (uploadFile)
+    {
+
+        uploadFile.size();
+        md5.begin();
+        md5.addStream(uploadFile, file_size);
+        md5.calculate();
+        uploadFile.close();
+        md5String = md5.toString();
+    }
+
+    // Firmware is always at least 128 kB and padded to 16 bytes
+    if (file_size < (1 << 17) || (file_size % 16 != 0) || md5_checksum != md5String)
+    {
+        Serial.print("M5 validation failed for file ");
+        Serial.print(filename);
+        return false;
+    }
+    else
+    {
+        Serial.print("M5 validation passed for file ");
+        Serial.print(filename);
+        return true;
+    }
 }
