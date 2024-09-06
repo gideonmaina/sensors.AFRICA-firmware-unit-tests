@@ -18,7 +18,9 @@ String new_firmware_filename = "/new_firmware.bin";
 bool loader_bin_saved = false;
 bool firmware_bin_saved = false;
 
-File uploadFile; // a File object to temporarily store the received file
+File uploadFile; // a File object to temporarily store the received
+
+// Function declarations
 void log_args();
 void uploadFiles();
 static void webserver_ota_begin();
@@ -27,13 +29,11 @@ static void setup_webserver();
 static void file_checker();
 void two_stage_firmware_update();
 bool validate_bin_md5(String filename, String md5_checksum);
+static bool SPIFFSAutoUpdate(String newFirmware, String newMD5);
 
 #define RESERVE_STRING(name, size)      \
     String name((const char *)nullptr); \
     name.reserve(size)
-
-// Function declarations
-void log_args();
 
 /****************************************************************
  * HTML helpers pulled from openstuttgart
@@ -122,23 +122,23 @@ static void webserver_ota_upload()
     page_content += "<br/><br/>";
     page_content += F("<form method='POST' action='/ota_begin' enctype='multipart/form-data' style='width:100%;'>\n<b> OTA OVER ESP AP WEBSERVER </b><br/>");
     page_content += F("<b> Firmware Loader bin</b><br/>");
-    String form_input = F("<label for='loader_checksum'><input type='text' name='loader_checksum' placeholder='Enter loader checksum'><br/>");
-    form_input += F("<label for='loader'><input type='file' name='loader' accept='.bin'><br/>");
+    String form_input = F("<div><label for='loader_checksum'><input type='text' name='loader_checksum' placeholder='Enter loader checksum'><br/>");
+    form_input += F("<label for='loader'><input type='file' name='loader' accept='.bin'></div><br/>");
     page_content += form_input;
     server.sendContent(page_content);
     page_content = "";
     form_input = "";
     page_content += F("<b> Firmware Bin</b><br/>");
-    form_input += F("<label for='fmw_checksum'><input type='text' name='fmw_checksum'  placeholder='Enter firmware checksum'><br/>");
-    form_input += F("<label for='firmware'><input type='file' name='firmware' accept='.bin'><br/>");
+    form_input += F("<div><label for='fmw_checksum'><input type='text' name='fmw_checksum'  placeholder='Enter firmware checksum'><br/>");
+    form_input += F("<label for='firmware'><input type='file' name='firmware' accept='.bin'></div><br/>");
     page_content += form_input;
-    page_content += F("<br/><br/><br/><input  type='submit' value='Upload'>");
+    page_content += F("<br/><br/><br/><div><input  type='submit' value='Upload'></div>");
     end_html_page(page_content);
 }
 
 static void webserver_ota_begin()
 {
-
+    log_args();
     if (server.args() > 0)
     {
         // Debuging: Log args
@@ -301,12 +301,12 @@ void loop()
     }
 }
 
-void two_stage_firmware_update()
+void firmware_update()
 {
 
     // validate new firmware file md5
 
-    if (!validate_bin_md5(loaderfilename, loader_checksum))
+    if (!validate_bin_md5(loaderfilename, loader_checksum)) // This is actually not needed for single stage
     {
         Serial.print('Deleting file: ');
         Serial.println(loaderfilename);
@@ -326,6 +326,27 @@ void two_stage_firmware_update()
     }
 
     // begin update
+
+    if (!SPIFFSAutoUpdate(new_firmware_filename, firmware_checksum))
+    {
+        Serial.println("SPIFFS auto update failed. Deleting files");
+
+        SPIFFS.remove(loaderfilename);
+        SPIFFS.remove(new_firmware_filename);
+
+        loader_bin_saved = false;
+        firmware_bin_saved - false;
+    }
+    else
+    {
+        Serial.println("System updated with new firmware successfully!");
+        // Either way delete those files
+        SPIFFS.remove(loaderfilename);
+        SPIFFS.remove(new_firmware_filename);
+
+        loader_bin_saved = false;
+        firmware_bin_saved - false;
+    }
 }
 
 bool validate_bin_md5(String filename, String md5_checksum)
@@ -360,4 +381,68 @@ bool validate_bin_md5(String filename, String md5_checksum)
         Serial.print(filename);
         return true;
     }
+}
+
+static bool SPIFFSAutoUpdate(String newFirmware, String newMD5)
+{
+
+    if (!SPIFFS.exists(newFirmware))
+    {
+        Serial.print("No Firmware file found, looking for: ");
+        Serial.println(newFirmware);
+        return false;
+    }
+    File updateFile = SPIFFS.open(newFirmware, "r");
+    if (!updateFile)
+    {
+        Serial.print("Failed to open : ");
+        Serial.print(newFirmware);
+        return false;
+    }
+    if (updateFile.size() >= ESP.getFreeSketchSpace())
+    {
+        Serial.println("Cannot update, Firmware too large");
+        return false;
+    }
+    if (!Update.begin(updateFile.size(), U_FLASH))
+    {
+        StreamString error;
+        Update.printError(error);
+
+        Serial.print("Update.begin returned: "),
+            Serial.println(error);
+        return false;
+    }
+
+    // set MD5
+    Update.setMD5(newMD5.c_str());
+
+    if (Update.writeStream(updateFile) != updateFile.size())
+    {
+        StreamString error;
+        Update.printError(error);
+
+        Serial.print("Update.writeStream returned: ");
+        Serial.print(error);
+        return false;
+    }
+    updateFile.close();
+
+    if (!Update.end())
+    {
+        StreamString error;
+        Update.printError(error);
+
+        Serial.println("Update.end() returned: ");
+        Serial.print(error);
+        return false;
+    }
+
+    Serial.println("Erasing SDK config.");
+    ESP.eraseConfig();
+
+    Serial.println("Finished successfully.. Rebooting!");
+    delay(500);
+    ESP.restart();
+    return true;
 }
