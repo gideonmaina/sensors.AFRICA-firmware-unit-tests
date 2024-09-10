@@ -23,13 +23,12 @@ File uploadFile; // a File object to temporarily store the received
 // Function declarations
 void log_args();
 void uploadFiles();
-static void webserver_ota_begin();
-static void webserver_ota_upload();
+static void webserver_render_ota_upload_page();
 static void setup_webserver();
 static void file_checker();
-void two_stage_firmware_update();
 bool validate_bin_md5(String filename, String md5_checksum);
 static bool SPIFFSAutoUpdate(String newFirmware, String newMD5);
+void webserver_parse_checksum();
 
 #define RESERVE_STRING(name, size)      \
     String name((const char *)nullptr); \
@@ -103,74 +102,45 @@ static void end_html_page(String &page_content)
 
 static void setup_webserver()
 {
-    server.on(F("/ota_upload"), webserver_ota_upload);
-    server.on(F("/ota_begin"), HTTP_POST, []()
-              { 
-                // server.sendHeader(F("Transfer-Encoding"), F("chunked"));
+    server.on(F("/ota_update"), webserver_render_ota_upload_page); // GET request
+    server.on(F("/ota_upload"), HTTP_POST, []()
+              {
+                server.sendHeader(F("Access-Control-Allow-Origin"), F("*"));
                 server.send(200); }, // Send status 200 (OK) to tell the client we are ready to receive
-              webserver_ota_begin);
+              uploadFiles);
+    server.on(F("/parse_checksum"), webserver_parse_checksum);
 
-    Serial.print("Starting Webserver... ");
+    Serial.println("\nStarting Webserver... ");
     server.begin();
 }
 
-static void webserver_ota_upload()
+static void webserver_render_ota_upload_page()
 {
-
+    // ToDO : Add input required attribute. Update send script
     RESERVE_STRING(page_content, XLARGE_STR);
     start_html_page(page_content, "OTA update");
     page_content += "<br/><br/>";
-    page_content += F("<form method='POST' action='/ota_begin' enctype='multipart/form-data' style='width:100%;'>\n<b> OTA OVER ESP AP WEBSERVER </b><br/>");
+    page_content += F("<form  style='width:100%;'>\n<b> OTA OVER ESP AP WEBSERVER </b><br/>");
     page_content += F("<b> Firmware Loader bin</b><br/>");
-    String form_input = F("<div><label for='loader_checksum'><input type='text' name='loader_checksum' placeholder='Enter loader checksum'><br/>");
+    String form_input = F("<div><label for='loader_checksum'>loader checksum</label><input type='text' name='loader_checksum' id='loader_checksum' placeholder='Enter loader checksum'><br/>");
     form_input += F("<label for='loader'><input type='file' name='loader' accept='.bin'></div><br/>");
     page_content += form_input;
     server.sendContent(page_content);
     page_content = "";
     form_input = "";
     page_content += F("<b> Firmware Bin</b><br/>");
-    form_input += F("<div><label for='fmw_checksum'><input type='text' name='fmw_checksum'  placeholder='Enter firmware checksum'><br/>");
-    form_input += F("<label for='firmware'><input type='file' name='firmware' accept='.bin'></div><br/>");
+    form_input += F("<div><label for='fmw_checksum'><input type='text' name='fmw_checksum' id='fmw_checksum'  placeholder='Enter firmware checksum'><br/>");
+    form_input += F("<label for='firmware'>firmware checksum</label><input type='file' name='firmware' accept='.bin'></div><br/>");
     page_content += form_input;
-    page_content += F("<br/><br/><br/><div><input  type='submit' value='Upload'></div>");
+    page_content += F("<br/><br/><br/><div><input  type='submit' value='Upload'></div> </form>");
+    page_content += F("<script>function handleSubmit(e){e.preventDefault(),e.stopPropagation(),console.log('Sending form data');const t='192.168.4.1/ota_begin',n='post',o=new XMLHttpRequest;o.onreadystatechange=function(){4===o.readyState&&200===o.status&&(document.createElement('p').innerText=o.responseText,console.log('File successfully uploaded!'))};const a=new FormData(form);o.open(n,t),o.send(a)}const form=document.querySelector('form');form.addEventListener('submit',handleSubmit);</script>");
     end_html_page(page_content);
-}
-
-static void webserver_ota_begin()
-{
-    log_args();
-    if (server.args() > 0)
-    {
-        // Debuging: Log args
-        log_args();
-
-        // get server post arguements
-        if (!server.hasArg("loader_checksum"))
-        {
-            Serial.println("Loader bin MD5 checksum missing");
-            return;
-        }
-        loader_checksum = server.arg("loader_checksum");
-        if (!server.hasArg("fmw_checksum"))
-        {
-            Serial.println("Firmware bin MD5 checksum missing");
-            return;
-        }
-        firmware_checksum = server.arg("fmw_checksum");
-    }
-
-    // uploadFiles();
-    uploadFiles();
 }
 
 void uploadFiles()
 {
     // upload a new file to the SPIFFS
     HTTPUpload &upload = server.upload();
-
-    Serial.print("Server upload status: ");
-    Serial.println(upload.status);
-
     if (upload.status == UPLOAD_FILE_START)
     {
 
@@ -193,7 +163,7 @@ void uploadFiles()
         if (uploadFile)
         {
             uploadFile.write(upload.buf, upload.currentSize);
-            Serial.println("written");
+            // Serial.println("written");
         }
     }
 
@@ -445,4 +415,35 @@ static bool SPIFFSAutoUpdate(String newFirmware, String newMD5)
     delay(500);
     ESP.restart();
     return true;
+}
+
+void webserver_parse_checksum()
+{
+    log_args();
+    if (server.args() > 0)
+    {
+        // Debuging: Log args
+        // log_args();
+
+        // get server post arguements
+        if (!server.hasArg("loader_checksum"))
+        {
+            Serial.println("Loader bin MD5 checksum missing");
+            return;
+        }
+        loader_checksum = server.arg("loader_checksum");
+        if (!server.hasArg("fmw_checksum"))
+        {
+            Serial.println("Firmware bin MD5 checksum missing");
+            return;
+        }
+        firmware_checksum = server.arg("fmw_checksum");
+
+        Serial.print("Loader checksum");
+        Serial.println(loader_checksum);
+        Serial.print("Firmware checksum");
+        Serial.println(firmware_checksum);
+        server.sendHeader(F("Access-Control-Allow-Origin"), F("*"));
+        server.send(200, "text/plain", "checksums received");
+    }
 }
