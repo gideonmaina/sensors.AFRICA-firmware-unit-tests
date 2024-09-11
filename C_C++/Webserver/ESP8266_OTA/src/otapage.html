@@ -1,0 +1,132 @@
+<!-- Example of html page to upload bin files and checksums for two-stage OTA update  -->
+
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>OTA update</title>
+    <meta name='viewport' content='width=device-width'>
+    <style type='text/css'>
+        body {
+            font-family: Arial;
+            width:80%;
+            margin: 0 auto;
+       
+        }
+        a {
+            text-decoration: none;
+            padding: 10px;
+            background: #3ba;
+            color: white;
+            display: block;
+            width: auto;
+            border-radius: 5px;
+            box-shadow: 0px 2px 2px #3ba;
+        }
+        input{
+            margin:1rem 0;
+        }
+        input[type='text'] {
+            width: 100%;
+        }
+
+        input[type='submit'] {
+            color: white;
+            text-align: left;
+            border-radius: 5px;
+            font-size: medium;
+            background: #b33;
+            box-shadow: 0px 2px 2px #b33;
+            padding: 9px !important;
+            width: 100%;
+            border-style: none;
+        }
+
+        input[type='submit']:hover {
+            background: #d44
+        }
+    </style>
+</head>
+
+<body>
+    <div style='min-height:129px;background-color:#3ba;margin-bottom:20px;box-shadow:0px 4px 6px #3ba;padding:4rem;'>
+        <br /><br />
+        <form method='POST' action='/ota_begin' enctype='multipart/form-data' style='width:100%;'><b> OTA OVER ESP AP
+                WEBSERVER </b><br />
+            <b> Firmware Loader bin</b><br />
+            <div><label for='loader_checksum'>loader checksum</label><input type='text' name='loader_checksum'
+                    id='loader_checksum' placeholder='Enter loader checksum' required><br />
+                <label for='loader'>Loader bin: </label><input type='file' name='loader' id='loader' accept='.bin' required >
+            </div><br />
+            <b> Firmware Bin</b><br />
+            <div><label for='fmw_checksum'><input type='text' name='fmw_checksum' id='fmw_checksum'
+                        placeholder='Enter firmware checksum' required><br />
+                    <label for='firmware'>Firmware bin: </label><input type='file' name='firmware' id='firmware' accept='.bin' required>
+            </div><br />
+            <br /><br /><br />
+            <div><input type='submit' value='Upload'></div>
+        </form>
+        <script>
+            const form = document.querySelector('form');
+            form.addEventListener('submit', handleSubmit);
+            
+            function handleSubmit(event) {
+              event.preventDefault();
+              event.stopPropagation();
+              console.log("Sending form data");
+            
+                  const checksum_url = 'http://192.168.4.1/parse_checksum';
+                  const upload_url = 'http://192.168.4.1/ota_upload';
+                  const method = 'post';
+                
+                  let xhr = new XMLHttpRequest();
+                  
+                // callback to handle the server response 
+                xhr.onreadystatechange = function() {
+                if (xhr.readyState === 4 && xhr.status === 200) {
+                  // The file has been uploaded successfully
+                  document.createElement('p').innerText = xhr.responseText;
+                  console.log("Send successfull");
+                }
+               };
+           
+                  const data = new FormData(form);
+                // for (const [key, value] of data) {
+                //   console.log(`${key}: ${value}`);
+                // }
+                //   first send the checksums
+                  xhr.open(method, checksum_url);
+                  xhr.setRequestHeader("Accept", "*/*");
+                //   xhr.setRequestHeader("Access-Control-Allow-Origin", "*");
+                  xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+    
+                  const checksums=`loader_checksum=${data.get('loader_checksum')}&fmw_checksum=${data.get('fmw_checksum')}`;
+                  console.log(checksums);
+              
+                  xhr.send(checksums);
+                  
+                  xhr = new XMLHttpRequest();
+                 const files=new FormData();
+                 files.append('loader',data.get('loader'));
+                 files.append('firmware',data.get('firmware'));
+                 files.values().forEach(element => {
+                    
+                     console.log(element);
+                 });
+                   xhr.open(method, upload_url);
+                   xhr.setRequestHeader("Accept", "*/*");
+                    xhr.setRequestHeader("Access-Control-Allow-Origin", "*");
+    
+                   xhr.send(files);
+ 
+
+            }
+
+        </script>
+
+        <br /><br />
+        <br /><br /><br />
+    </div>
+</body>
+
+</html>
