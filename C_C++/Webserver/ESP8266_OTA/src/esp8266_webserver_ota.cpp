@@ -11,11 +11,11 @@ ESP8266WebServer server(80);
 constexpr unsigned LARGE_STR = 512 - 1;
 constexpr unsigned XLARGE_STR = 1024 - 1;
 
-String loader_checksum, firmware_checksum, fname = "";
+String firmware_checksum, fname = "";
+
 // Replace bin filenames with the exactly the ones you want to upload
-String loaderfilename = "/loader-002.bin";
 String new_firmware_filename = "/new_firmware.bin";
-bool loader_bin_saved = false;
+
 bool firmware_bin_saved = false;
 
 File uploadFile; // a File object to temporarily store the received
@@ -29,6 +29,7 @@ static void file_checker();
 bool validate_bin_md5(String filename, String md5_checksum);
 static bool SPIFFSAutoUpdate(String newFirmware, String newMD5);
 void webserver_parse_checksum();
+void firmware_update();
 
 #define RESERVE_STRING(name, size)      \
     String name((const char *)nullptr); \
@@ -108,7 +109,7 @@ static void setup_webserver()
                 server.sendHeader(F("Access-Control-Allow-Origin"), F("*"));
                 server.send(200); }, // Send status 200 (OK) to tell the client we are ready to receive
               uploadFiles);
-    server.on(F("/parse_checksum"), webserver_parse_checksum);
+    server.on(F("/parse_checksum"), webserver_parse_checksum); // ? Useful is bin checksum is to be validated
 
     Serial.println("\nStarting Webserver... ");
     server.begin();
@@ -117,23 +118,19 @@ static void setup_webserver()
 static void webserver_render_ota_upload_page()
 {
     // ToDO : Add input required attribute. Update send script
+    String form_input = "";
     RESERVE_STRING(page_content, XLARGE_STR);
     start_html_page(page_content, "OTA update");
-    page_content += "<br/><br/>";
-    page_content += F("<form  style='width:100%;'>\n<b> OTA OVER ESP AP WEBSERVER </b><br/>");
-    page_content += F("<b> Firmware Loader bin</b><br/>");
-    String form_input = F("<div><label for='loader_checksum'>loader checksum</label><input type='text' name='loader_checksum' id='loader_checksum' placeholder='Enter loader checksum'><br/>");
-    form_input += F("<label for='loader'><input type='file' name='loader' accept='.bin'></div><br/>");
-    page_content += form_input;
     server.sendContent(page_content);
     page_content = "";
-    form_input = "";
+    page_content += "<br/><br/>";
+    page_content += F("<form  method='POST' action='/ota_upload' enctype='multipart/form-data' style='width:100%;'>\n<b> OTA OVER ESP AP WEBSERVER </b><br/>");
     page_content += F("<b> Firmware Bin</b><br/>");
-    form_input += F("<div><label for='fmw_checksum'><input type='text' name='fmw_checksum' id='fmw_checksum'  placeholder='Enter firmware checksum'><br/>");
-    form_input += F("<label for='firmware'>firmware checksum</label><input type='file' name='firmware' accept='.bin'></div><br/>");
+    // form_input += F("<div><label for='fmw_checksum'><input type='text' name='fmw_checksum' id='fmw_checksum'  placeholder='Enter firmware checksum'><br/>");
+    form_input += F("<label for='firmware'>Firmware bin file</label><input type='file' name='firmware' id='firmware' accept='.bin' required></div><br/>");
     page_content += form_input;
-    page_content += F("<br/><br/><br/><div><input  type='submit' value='Upload'></div> </form>");
-    page_content += F("<script>function handleSubmit(e){e.preventDefault(),e.stopPropagation(),console.log('Sending form data');const t='192.168.4.1/ota_begin',n='post',o=new XMLHttpRequest;o.onreadystatechange=function(){4===o.readyState&&200===o.status&&(document.createElement('p').innerText=o.responseText,console.log('File successfully uploaded!'))};const a=new FormData(form);o.open(n,t),o.send(a)}const form=document.querySelector('form');form.addEventListener('submit',handleSubmit);</script>");
+    page_content += F("<br/><br/><div><input  type='submit' value='Upload'></div> </form>");
+    // ToDo: Add a script to show upload progress using XMLHttpRequest
     end_html_page(page_content);
 }
 
@@ -174,16 +171,12 @@ void uploadFiles()
             uploadFile.close(); // Close the file again
             Serial.print("File Upload Size: ");
             Serial.println(upload.totalSize);
-            String msg = "201: Successfully created file ";
+            String msg = "201: Successfully uploaded file ";
             msg += fname;
             server.send(200, "text/plain", msg);
             Serial.println(msg);
 
-            if (fname = loaderfilename)
-            {
-                loader_bin_saved = true;
-            }
-            else if (fname = new_firmware_filename)
+            if (fname == new_firmware_filename)
             {
                 firmware_bin_saved = true;
             }
@@ -217,17 +210,6 @@ void log_args()
 
 static void file_checker()
 {
-    File loaderFile = SPIFFS.open(F("/loader-002.bin"), "r");
-    if (!loaderFile)
-    {
-        Serial.println("loader file does not exist");
-    }
-    else
-    {
-
-        Serial.println("loader file present");
-        loaderFile.close();
-    }
 
     File fmwFile = SPIFFS.open(F("/new_firmware.bin"), "r");
 
@@ -243,83 +225,43 @@ static void file_checker()
     }
 }
 
-void setup()
-{
-    delay(1000);
-    Serial.begin(9600);
-    delay(2000);
-    const char *ssid = "ESP8266-OTA-TEST";
-    const char *password = "123456789";
-    WiFi.mode(WIFI_AP);
-    const IPAddress apIP(192, 168, 4, 1);
-    WiFi.softAP(ssid, password);
-    WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
-    delay(2000);
-    setup_webserver();
-    SPIFFS.begin();
-    delay(2000);
-    file_checker(); // Reset after successful file upload to view saved files
-}
-
-void loop()
-{
-    server.handleClient();
-    if (loader_bin_saved && firmware_bin_saved)
-    {
-        Serial.println("Beginning two stage firmware update");
-        void two_stage_firmware_update();
-    }
-}
-
 void firmware_update()
 {
 
     // validate new firmware file md5
 
-    if (!validate_bin_md5(loaderfilename, loader_checksum)) // This is actually not needed for single stage
-    {
-        Serial.print('Deleting file: ');
-        Serial.println(loaderfilename);
-        SPIFFS.remove(loaderfilename);
-        loader_bin_saved = false;
-        Serial.println("Two-stage firmware update failed at md5 checksum validation");
-        return;
-    }
-    if (!validate_bin_md5(new_firmware_filename, firmware_checksum))
-    {
-        Serial.print('Deleting file: ');
-        Serial.println(new_firmware_filename);
-        SPIFFS.remove(new_firmware_filename);
-        firmware_bin_saved = false;
-        Serial.println("Two-stage firmware update failed at md5 checksum validation");
-        return;
-    }
+    // if (!validate_bin_md5(new_firmware_filename, firmware_checksum))
+    // {
+    //     Serial.print("Deleting file: ");
+    //     Serial.println(new_firmware_filename);
+    //     SPIFFS.remove(new_firmware_filename);
+    //     firmware_bin_saved = false;
+    //     Serial.println("firmware update failed at md5 checksum validation");
+    //     return;
+    // }
 
     // begin update
 
     if (!SPIFFSAutoUpdate(new_firmware_filename, firmware_checksum))
     {
         Serial.println("SPIFFS auto update failed. Deleting files");
-
-        SPIFFS.remove(loaderfilename);
         SPIFFS.remove(new_firmware_filename);
 
-        loader_bin_saved = false;
-        firmware_bin_saved - false;
+        firmware_bin_saved = false;
     }
-    else
-    {
-        Serial.println("System updated with new firmware successfully!");
-        // Either way delete those files
-        SPIFFS.remove(loaderfilename);
-        SPIFFS.remove(new_firmware_filename);
 
-        loader_bin_saved = false;
-        firmware_bin_saved - false;
-    }
+    // ? This code block will never be executed if firmware update is successful
+    // else
+    // {
+    //     Serial.println("System updated with new firmware successfully!");
+    //     // Either way delete those files
+
+    //     SPIFFS.remove(new_firmware_filename);
+    //     firmware_bin_saved = false;
+    // }
 }
 
-bool validate_bin_md5(String filename, String md5_checksum)
+bool validate_bin_md5(String filename, String md5_checksum) // ! MD5 mismatch, skipping..
 {
 
     // validate new firmware file md5
@@ -330,19 +272,27 @@ bool validate_bin_md5(String filename, String md5_checksum)
     if (uploadFile)
     {
 
-        uploadFile.size();
+        file_size = uploadFile.size();
+        Serial.print("File size: ");
+        Serial.println(file_size);
         md5.begin();
         md5.addStream(uploadFile, file_size);
         md5.calculate();
         uploadFile.close();
         md5String = md5.toString();
+        Serial.print("Generated md5 checkusum for file ");
+        Serial.print(filename);
+        Serial.print(" = ");
+        Serial.println(md5String);
     }
 
+    Serial.print("Bitwise 1<<17 = ");
+    Serial.println((1 << 17));
     // Firmware is always at least 128 kB and padded to 16 bytes
     if (file_size < (1 << 17) || (file_size % 16 != 0) || md5_checksum != md5String)
     {
         Serial.print("M5 validation failed for file ");
-        Serial.print(filename);
+        Serial.println(filename);
         return false;
     }
     else
@@ -369,6 +319,11 @@ static bool SPIFFSAutoUpdate(String newFirmware, String newMD5)
         Serial.print(newFirmware);
         return false;
     }
+
+    unsigned int free_space = ESP.getFreeSketchSpace();
+    Serial.print("EsP free sketch space: ");
+    Serial.println(free_space);
+
     if (updateFile.size() >= ESP.getFreeSketchSpace())
     {
         Serial.println("Cannot update, Firmware too large");
@@ -419,19 +374,12 @@ static bool SPIFFSAutoUpdate(String newFirmware, String newMD5)
 
 void webserver_parse_checksum()
 {
-    log_args();
+
     if (server.args() > 0)
     {
         // Debuging: Log args
-        // log_args();
-
+        log_args();
         // get server post arguements
-        if (!server.hasArg("loader_checksum"))
-        {
-            Serial.println("Loader bin MD5 checksum missing");
-            return;
-        }
-        loader_checksum = server.arg("loader_checksum");
         if (!server.hasArg("fmw_checksum"))
         {
             Serial.println("Firmware bin MD5 checksum missing");
@@ -439,11 +387,37 @@ void webserver_parse_checksum()
         }
         firmware_checksum = server.arg("fmw_checksum");
 
-        Serial.print("Loader checksum");
-        Serial.println(loader_checksum);
         Serial.print("Firmware checksum");
         Serial.println(firmware_checksum);
         server.sendHeader(F("Access-Control-Allow-Origin"), F("*"));
         server.send(200, "text/plain", "checksums received");
+    }
+}
+
+void setup()
+{
+
+    Serial.begin(9600);
+    delay(2000);
+    const char *ssid = "ESP8266-OTA-TEST";
+    const char *password = "123456789";
+    WiFi.mode(WIFI_AP);
+    const IPAddress apIP(192, 168, 4, 1);
+    WiFi.softAP(ssid, password);
+    WiFi.softAPConfig(apIP, apIP, IPAddress(255, 255, 255, 0));
+    delay(2000);
+    setup_webserver();
+    SPIFFS.begin();
+    delay(2000);
+    file_checker(); // Reset after successful file upload to view saved files
+}
+
+void loop()
+{
+    server.handleClient();
+    if (firmware_bin_saved)
+    {
+        Serial.println("Beginning firmware update");
+        firmware_update();
     }
 }
