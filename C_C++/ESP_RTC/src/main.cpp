@@ -3,9 +3,10 @@
 #include <ESP32Time.h>
 
 ESP32Time rtc; // Create an instance of the ESP32Time class
+char timezone[6] = "+0300";
 
 void setESP32Time();
-struct tm timeinfo;
+
 void setup()
 {
   Serial.begin(9600);
@@ -17,8 +18,8 @@ void loop()
 {
   // put your main code here, to run repeatedly:
   delay(10000);
-
-  Serial.println(rtc.getTime("%Y-%m-%dT%H:%M:%S")); // YYYY-MM-DDThh:mm:ss+HH:MM
+  String time = rtc.getTime("%Y-%m-%dT%H:%M:%S") + timezone; // YYYY-MM-DDThh:mm:ss+HH:MM
+  Serial.println(time);
 }
 
 void setESP32Time()
@@ -32,6 +33,7 @@ void setESP32Time()
   tm.Month = 1; // January
   tm.Year = 53; // Year 2023 (2023 - 1970 = 53)
 
+  // rtc.offset = 3600 * 3; // Set timezone offset in seconds (3 hours ahead of UTC)
   time_t t = makeTime(tm);
   Serial.print("Time: ");
   Serial.println(t);
