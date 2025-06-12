@@ -12,6 +12,7 @@ public:
 
   enum PIN
   {
+    // Q0__Q7 or QA__QH
     Q0 = 0,
     Q1 = 1,
     Q2 = 2,
@@ -45,12 +46,17 @@ public:
         _byte |= (1 << (8 - 1 - i)); // Set the bit if it's 1
       }
     }
+    Serial.print("PIN STATE:\t");
+    for (int i = 0; i < 8; i++)
+    {
+      Serial.print(_pins_state[i]);
+    }
+    Serial.print("\t");
     Serial.print("CONVERTED BYTE:\t");
     Serial.println(_byte, BIN); // Add a newline for readability
 
     digitalWrite(latchPin, LOW);
-    shiftOut(dataPin, clockPin, MSBFIRST, 0);
-    shiftOut(dataPin, clockPin, MSBFIRST, _byte);
+    shiftOut(dataPin, clockPin, LSBFIRST, _byte);
     digitalWrite(latchPin, HIGH);
   }
 
@@ -68,11 +74,6 @@ public:
     Serial.println(state);
     int _pin = pin_map[pinName];
     _pins_state[_pin] = state;
-    for (int i = 0; i < 8; i++)
-    {
-      Serial.print(_pins_state[i]);
-    }
-    Serial.println();
   }
 
 private:
@@ -96,16 +97,16 @@ void setup()
 void loop()
 {
 
-  delay(5000);
+  delay(2000);
   LEDS.setPinState("PMS_LED", LOW);
   LEDS.updateOutputState();
-  delay(3000);
+  delay(5000);
   LEDS.setPinState("DHT_LED", LOW);
   LEDS.updateOutputState();
-  delay(3000);
+  delay(5000);
   LEDS.setPinState("PMS_LED", HIGH);
   LEDS.updateOutputState();
-  delay(3000);
+  delay(5000);
   LEDS.setPinState("DHT_LED", HIGH);
   LEDS.updateOutputState(); // ! 10010000 doesn't get outputed anymore 🤯
   delay(3000);
